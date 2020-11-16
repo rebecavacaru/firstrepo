@@ -2,61 +2,63 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-
 int main(int argc, char** argv) {
-	int world_size, world_rank;
-	int partialSum = 0;
-	long long finalSum = 0;
-	int nrElements, nElementsPerProcess;
-	double totalTime, startCalculTime, endCalculTime;
-	int* elements = NULL;
-	int* receivedElements;
 
+	double startSendTime = 0, startReceiveTime = 0, endSendTime = 0, endReceiveTime = 0;
+	int world_size, world_rank, n, partialSum = 0, totalSum = 0;
+	int* data = NULL;
+
+	FILE* inputElements = fopen("C:\\Users\\rebeca.vacaru\\Documents\\suma_elem\\elem.txt", "r");
+	fscanf(inputElements, "%d", &n);
 
 	MPI_Init(NULL, NULL);
 	MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
 	if (world_rank == 0) {
-		FILE* f = fopen("C:\\Users\\rebeca.vacaru\\Documents\\suma_op_col\\elem.txt", "r");
-		fscanf(f, "%d", &nrElements);
-
-		elements = (int*)malloc(nrElements * sizeof(int));
-        for (int i = 0; i < nrElements; i++) {
-			fscanf(f, "%d", elements + i);
-		}
-		fclose(f);
-		nElementsPerProcess= nrElements/world_size;
+		data = (int*)malloc(n * sizeof(int));
+		for (int i = 0; i < n; i++) {
+			fscanf(inputElements, "%d", &data[i]);
 		}
 
-    MPI_Bcast(&nElementsPerProcess, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    receivedElements = (int*)malloc(nElementsPerProcess * sizeof(int));
-    totalTime = MPI_Wtime();
-	MPI_Scatter(elements, nElementsPerProcess, MPI_INT, receivedElements, nElementsPerProcess,  MPI_INT, 0, MPI_COMM_WORLD);
-
-	startCalculTime = MPI_Wtime();
-	for (int i = 0; i < nElementsPerProcess; i++) {
-		partialSum += receivedElements[i];
+		startSendTime = MPI_Wtime();
+		for (int i = n / world_size, j = 1; j < world_size; i += n / world_size, j++) {
+			MPI_Send(&data[i], n / world_size, MPI_INT, j, 0, MPI_COMM_WORLD);
+		}
 	}
-	endCalculTime = MPI_Wtime();
+	else {
+		data = (int*)malloc(n / world_size * sizeof(int));
+		MPI_Recv(data, n / world_size, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+	}
 
-	MPI_Reduce(&partialSum, &finalSum, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-    totalTime = MPI_Wtime() - totalTime;
-	if (world_rank == 0)
-	{
-		for (int i = nrElements - (nrElements % world_size); i < nrElements; i++) {
-			finalSum += elements[i];
+	startReceiveTime = MPI_Wtime();
+
+	for (int i = 0; i < n / world_size; i++) {
+		partialSum += data[i];
+	}
+	endReceiveTime = MPI_Wtime() - startReceiveTime;
+
+	if (world_rank != 0) {
+		MPI_Send(&partialSum, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+	}
+	else {
+		startReceiveTime = MPI_Wtime();
+		for (int i = 0; i < n % world_size; i++) {
+			partialSum += data[n - n % world_size + i];
 		}
+		endReceiveTime += MPI_Wtime() - startReceiveTime;
 
-        printf("Final sum is: ");
-        printf("%d",finalSum);
-        printf("\nComputed in: ");
-        printf("%.16f", endCalculTime-startCalculTime);
-        printf("\nComunication time: ");
-        printf("%.16f", totalTime- ( endCalculTime-startCalculTime ));
-        printf("\nTotal time: ");
-        printf("%.16f", totalTime);
+		totalSum = partialSum;
+		for (int i = 1; i < world_size; i++) {
+			MPI_Recv(&partialSum, 1, MPI_INT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			totalSum += partialSum;
+		}
+		endSendTime = MPI_Wtime() - startSendTime;
 
+
+        printf("Final sum is %d",totalSum);
+        printf("\nComputed in %f seconds",endSendTime);
+        printf("\nIt needed %f seconds to compute the sum by each process",endReceiveTime);
 	}
 	MPI_Finalize();
 }
